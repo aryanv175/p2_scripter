@@ -1,0 +1,15 @@
+## Script de SSOO
+echo "Hola Mundo"
+cat < salida.txt > copia.txt
+ls archivo_inexistente < salida.txt > salida2.txt !> errores2.txt
+sleep 2 &
+echo "Esto se imprime antes de que sleep acabe"
+echo "hola mundo" | tr a-z A-Z
+echo "test multi pipe" | tr a-z A-Z | rev | tr A-Z a-z | rev | wc -w
+echo >           # falta argumento
+ls !>            # falta argumento
+cat <            # falta argumento
+echo a b c d e f g h i j k l m n o p q r s t u v w x y z
+cat < noexiste.txt
+ls archivo1 archivo2 | wc -l !> errores_pipe.txt
+./mygrep test.txt test

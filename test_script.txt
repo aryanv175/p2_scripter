@@ -1,0 +1,4 @@
+## Script de SSOO
+echo "Test 1"
+echo "Test 2"
+./mygrep test.txt test
