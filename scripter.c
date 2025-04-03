@@ -98,90 +98,91 @@ void procesar_linea(char *linea) {
     }
 
     //PIPES
-    int pipe_fds[max_commands - 1][2]; //create an array to store n-1 pipes, being n the max of commands it can receive
-    //max_commands can be changed, number 2 is for the pair of descriptors, cada pipe tiene dos extremos (entrada, salida)
-    //pipe_fds[0] - connects cmd 0 with cmd 1
-    //pipe_fds[1] - connects cmd 1 with 2
-    for (int i = 0; i < num_comandos; i++) { //loop for each cmd
-        memset(argvv, 0, sizeof(argvv)); //clean arguments and file
-        filev[0] = filev[1] = filev[2] = NULL;
+    // Creamos los pipes necesarios antes del bucle
+int pipe_fds[max_commands - 1][2];
 
-        //split the subcmd by spaces and apply redirections function (<,>,!>)
-        int args_count = tokenizar_linea(comandos[i], " \t\n", argvv, max_args);
-        procesar_redirecciones(argvv);
-
-        //if cmd is empty, ignore it
-        if (argvv[0] == NULL) {
-            fprintf(stderr, "Línea ignorada: comando vacío o inválido\n");
-            continue;
-        }
-
-        //we create a pipe only if we are not executing the last command, bc the last one doesn't need one
-        if (i < num_comandos - 1 && pipe(pipe_fds[i]) == -1) {
-            perror("Error al crear pipe");
-            exit(EXIT_FAILURE);
-        }
-
-        //CHILD PROCESS for each cmd, independent process
-        pid_t pid = fork();
-        if (pid < 0) {
-            perror("Error en fork");
-            continue;
-        }
-
-        if (pid == 0) { // child
-            if (i > 0) { //if the cmd executing is not the first one, we read the output of the previous cmd
-                //if it's not the first cmd, redirect STDIN to read end of previous pipe
-                dup2(pipe_fds[i - 1][0], STDIN_FILENO);
-            }
-            if (i < num_comandos - 1) { //if not the last cmd, redirect STDOUT to write end of current pipe
-                dup2(pipe_fds[i][1], STDOUT_FILENO);
-            }
-
-            for (int j = 0; j < num_comandos - 1; j++) { //close all pipe ends to avoid zombie processes
-                close(pipe_fds[j][0]);
-                close(pipe_fds[j][1]);
-            }
-
-            //REDIRECTIONS
-            if (filev[0]) {
-                int fd_in = open(filev[0], O_RDONLY);
-                if (fd_in < 0) { perror("Error en redirección de entrada"); exit(1); }
-                dup2(fd_in, STDIN_FILENO); //open file and redirect STDIN
-                close(fd_in);
-            }
-            if (filev[1]) {
-                int fd_out = open(filev[1], O_WRONLY | O_CREAT | O_TRUNC, 0666);
-                if (fd_out < 0) { perror("Error en redirección de salida"); exit(1); }
-                dup2(fd_out, STDOUT_FILENO); //open file and redirect STDOUT to file
-                close(fd_out);
-            }
-            if (filev[2]) {
-                int fd_err = open(filev[2], O_WRONLY | O_CREAT | O_TRUNC, 0666);
-                if (fd_err < 0) { perror("Error en redirección de error"); exit(1); }
-                dup2(fd_err, STDERR_FILENO);
-                close(fd_err);
-            }
-
-            execvp(argvv[0], argvv); //execvp replaces the child process with the command
-            perror("Error en execvp");
-            exit(EXIT_FAILURE);
-        }
-
-        // PARENT PROCESS
-        if (i < num_comandos - 1) {
-            close(pipe_fds[i][1]); // cerrar escritura
-        }
-        if (i > 0) {
-            close(pipe_fds[i - 1][0]); // cerrar lectura anterior
-        }
-
-        if (!background) { //if not background, we wait until the child process finishes
-            waitpid(pid, NULL, 0);
-        } else { //if background, don't wait, print PID
-            printf("[Background PID: %d]\n", pid);
-        }
+for (int i = 0; i < num_comandos - 1; i++) {
+    if (pipe(pipe_fds[i]) == -1) {
+        perror("Error al crear pipe");
+        exit(EXIT_FAILURE);
     }
+}
+
+for (int i = 0; i < num_comandos; i++) {
+    memset(argvv, 0, sizeof(argvv));
+    filev[0] = filev[1] = filev[2] = NULL;
+
+    int args_count = tokenizar_linea(comandos[i], " \t\n", argvv, max_args);
+    procesar_redirecciones(argvv);
+
+    if (argvv[0] == NULL) {
+        fprintf(stderr, "Línea ignorada: comando vacío o inválido\n");
+        continue;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("Error en fork");
+        continue;
+    }
+
+    if (pid == 0) {  // CHILD
+        // Si no es el primer comando, redirigimos entrada al pipe anterior
+        if (i > 0) {
+            dup2(pipe_fds[i - 1][0], STDIN_FILENO);
+        }
+
+        // Si no es el último comando, redirigimos salida al pipe actual
+        if (i < num_comandos - 1) {
+            dup2(pipe_fds[i][1], STDOUT_FILENO);
+        }
+
+        // Cerramos todos los extremos de los pipes en el hijo
+        for (int j = 0; j < num_comandos - 1; j++) {
+            close(pipe_fds[j][0]);
+            close(pipe_fds[j][1]);
+        }
+
+        // Redirecciones de archivos
+        if (filev[0]) {
+            int fd_in = open(filev[0], O_RDONLY);
+            if (fd_in < 0) { perror("Error en redirección de entrada"); exit(1); }
+            dup2(fd_in, STDIN_FILENO);
+            close(fd_in);
+        }
+        if (filev[1]) {
+            int fd_out = open(filev[1], O_WRONLY | O_CREAT | O_TRUNC, 0666);
+            if (fd_out < 0) { perror("Error en redirección de salida"); exit(1); }
+            dup2(fd_out, STDOUT_FILENO);
+            close(fd_out);
+        }
+        if (filev[2]) {
+            int fd_err = open(filev[2], O_WRONLY | O_CREAT | O_TRUNC, 0666);
+            if (fd_err < 0) { perror("Error en redirección de error"); exit(1); }
+            dup2(fd_err, STDERR_FILENO);
+            close(fd_err);
+        }
+
+        execvp(argvv[0], argvv);
+        perror("Error en execvp");
+        exit(EXIT_FAILURE);
+    }
+
+    // PADRE
+    if (i > 0) {
+        close(pipe_fds[i - 1][0]); // cerramos lectura anterior
+    }
+    if (i < num_comandos - 1) {
+        close(pipe_fds[i][1]); // cerramos escritura actual
+    }
+
+    if (!background) {
+        waitpid(pid, NULL, 0);
+    } else {
+        printf("[Background PID: %d]\n", pid);
+    }
+}
+
 }
 
 /*
@@ -192,27 +193,38 @@ void procesar_linea(char *linea) {
  *  - 0 si EOF sin datos,
  *  - -1 si ocurre error o línea demasiado larga.
  */
-int read_line(FILE *fichero, char *buffer, int max_length) {
-    char *result = fgets(buffer, max_length, fichero);
-    if (result == NULL) {
-        return 0;  // EOF or error
+int read_line(int fd, char *buffer, int max_length) {
+    int i = 0;
+    char c;
+    ssize_t bytes_read;
+
+    while (i < max_length - 1) {
+        bytes_read = read(fd, &c, 1);
+        if (bytes_read == 0) {
+            // EOF
+            if (i == 0) return 0;
+            break;
+        } else if (bytes_read < 0) {
+            perror("Error al leer del fichero");
+            return -1;
+        }
+
+        if (c == '\n') break;
+
+        buffer[i++] = c;
     }
-    
-    // Remove trailing newline if present
-    size_t len = strlen(buffer);
-    if (len > 0 && buffer[len-1] == '\n') {
-        buffer[len-1] = '\0';
-        len--;
-    }
-    
-    // Check if line is too long
-    if (len == max_length - 1 && buffer[len-1] != '\n') {
+
+    buffer[i] = '\0';
+
+    // Línea muy larga
+    if (i == max_length - 1 && c != '\n') {
         fprintf(stderr, "Línea demasiado larga (más de %d caracteres)\n", max_length - 1);
         return -1;
     }
-    
-    return len;
+
+    return i;
 }
+
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
@@ -220,27 +232,28 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    FILE *fichero = fopen(argv[1], "r"); //opens file in read mode, if it fails -> NULL
-    if (fichero == NULL) {
+    int fd = open(argv[1], O_RDONLY); //opens file in read mode
+    if (fd == -1) {
         perror("Error al abrir el fichero");
         return 1;
     }
+
 
     char buffer[max_line]; // create a buffer to store each line
     int n_leidos;
     
     // Check if first line is "## Script de SSOO"
-    if ((n_leidos = read_line(fichero, buffer, max_line)) <= 0 || 
+    if ((n_leidos = read_line(fd, buffer, max_line)) <= 0 ||
         strcmp(buffer, "## Script de SSOO") != 0) {
         perror("Error: El primer renglón debe ser '## Script de SSOO'");
-        fclose(fichero);
+        close(fd);
         return -1;
     }
     
 
     // Process remaining lines
     int line_count = 0;
-    while ((n_leidos = read_line(fichero, buffer, max_line)) > 0) {
+    while ((n_leidos = read_line(fd, buffer, max_line)) > 0) {
         line_count++;
         printf("\u2192 Línea leída [%d]: %s\n", line_count, buffer);
         
@@ -255,7 +268,7 @@ int main(int argc, char *argv[]) {
         
         if (solo_espacios) {
             perror("Error: Línea vacía encontrada");
-            fclose(fichero);
+            close(fd);
             return -1;
         }
         
@@ -263,6 +276,6 @@ int main(int argc, char *argv[]) {
     }
 
     printf("Total lines processed: %d\n", line_count);
-    fclose(fichero);
+    close(fd);
     return 0;
 }
