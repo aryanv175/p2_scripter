@@ -98,9 +98,11 @@ void procesar_linea(char *linea) {
     }
 
     //PIPES
-    // Creamos los pipes necesarios antes del bucle
-int pipe_fds[max_commands - 1][2];
-
+    //PIPES
+int pipe_fds[max_commands - 1][2]; //create an array to store n-1 pipes, being n the max of commands it can receive
+//max_commands can be changed, number 2 is for the pair of descriptors, cada pipe tiene dos extremos (entrada, salida)
+//pipe_fds[0] - connects cmd 0 with cmd 1
+//pipe_fds[1] - connects cmd 1 with 2
 for (int i = 0; i < num_comandos - 1; i++) {
     if (pipe(pipe_fds[i]) == -1) {
         perror("Error al crear pipe");
@@ -108,52 +110,53 @@ for (int i = 0; i < num_comandos - 1; i++) {
     }
 }
 
-for (int i = 0; i < num_comandos; i++) {
-    memset(argvv, 0, sizeof(argvv));
+for (int i = 0; i < num_comandos; i++) { //loop for each cmd
+    memset(argvv, 0, sizeof(argvv)); //clean arguments and file
     filev[0] = filev[1] = filev[2] = NULL;
 
+    //split the subcmd by spaces and apply redirections function (<,>,!>)
     int args_count = tokenizar_linea(comandos[i], " \t\n", argvv, max_args);
     procesar_redirecciones(argvv);
 
+    //if cmd is empty, ignore it
     if (argvv[0] == NULL) {
         fprintf(stderr, "Línea ignorada: comando vacío o inválido\n");
         continue;
     }
 
+    //CHILD PROCESS for each cmd, independent process
     pid_t pid = fork();
     if (pid < 0) {
         perror("Error en fork");
         continue;
     }
 
-    if (pid == 0) {  // CHILD
-        // Si no es el primer comando, redirigimos entrada al pipe anterior
-        if (i > 0) {
+    if (pid == 0) { // child
+        if (i > 0) { //if the cmd executing is not the first one, we read the output of the previous cmd
+            //if it's not the first cmd, redirect STDIN to read end of previous pipe
             dup2(pipe_fds[i - 1][0], STDIN_FILENO);
         }
-
-        // Si no es el último comando, redirigimos salida al pipe actual
-        if (i < num_comandos - 1) {
+        if (i < num_comandos - 1) { //if not the last cmd, redirect STDOUT to write end of current pipe
             dup2(pipe_fds[i][1], STDOUT_FILENO);
         }
 
-        // Cerramos todos los extremos de los pipes en el hijo
+        //close all pipe ends to avoid zombie processes
         for (int j = 0; j < num_comandos - 1; j++) {
             close(pipe_fds[j][0]);
             close(pipe_fds[j][1]);
         }
 
-        // Redirecciones de archivos
+        //REDIRECTIONS
         if (filev[0]) {
             int fd_in = open(filev[0], O_RDONLY);
             if (fd_in < 0) { perror("Error en redirección de entrada"); exit(1); }
-            dup2(fd_in, STDIN_FILENO);
+            dup2(fd_in, STDIN_FILENO); //open file and redirect STDIN
             close(fd_in);
         }
         if (filev[1]) {
             int fd_out = open(filev[1], O_WRONLY | O_CREAT | O_TRUNC, 0666);
             if (fd_out < 0) { perror("Error en redirección de salida"); exit(1); }
-            dup2(fd_out, STDOUT_FILENO);
+            dup2(fd_out, STDOUT_FILENO); //open file and redirect STDOUT to file
             close(fd_out);
         }
         if (filev[2]) {
@@ -163,22 +166,22 @@ for (int i = 0; i < num_comandos; i++) {
             close(fd_err);
         }
 
-        execvp(argvv[0], argvv);
+        execvp(argvv[0], argvv); //execvp replaces the child process with the command
         perror("Error en execvp");
         exit(EXIT_FAILURE);
     }
 
-    // PADRE
+    // PARENT PROCESS
     if (i > 0) {
-        close(pipe_fds[i - 1][0]); // cerramos lectura anterior
+        close(pipe_fds[i - 1][0]); // cerrar lectura anterior
     }
     if (i < num_comandos - 1) {
-        close(pipe_fds[i][1]); // cerramos escritura actual
+        close(pipe_fds[i][1]); // cerrar escritura actual
     }
 
-    if (!background) {
+    if (!background) { //if not background, we wait until the child process finishes
         waitpid(pid, NULL, 0);
-    } else {
+    } else { //if background, don't wait, print PID
         printf("[Background PID: %d]\n", pid);
     }
 }
